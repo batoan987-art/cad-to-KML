@@ -19,27 +19,11 @@ transformer = pyproj.Transformer.from_crs(VN2000_KH, WGS84_PROJ4, always_xy=True
 # Thiết lập cấu hình trang giao diện Streamlit
 st.set_page_config(page_title="CAD to KMZ Converter - Khánh Hòa", layout="wide")
 
-# 2. THIẾT LẬP CẢNH BÁO BẢN QUYỀN CHUẨN WEB
-# ==============================================================================
-@st.dialog("⚠️")
-def show_copyright_warning():
-    st.warning("**THÔNG BÁO**")
-    st.markdown("""
-    Chương trình này được nghiên cứu và phát triển bởi Bá Toàn chuyên viên Sở Xây dựng tỉnh Khánh Hòa.
-    
-    *Vui lòng góp ý đến: Ba.toan987@gmail.com!*
-    """)
-    if st.button("Tôi Đã Hiểu & Đồng Ý", type="primary"):
-        st.rerun()
-
-if 'warning_shown' not in st.session_state:
-    st.session_state['warning_shown'] = True
-    show_copyright_warning()
 # ==============================================================================
 # 2. GIAO DIỆN CHÍNH CỦA ỨNG DỤNG
 # ==============================================================================
 st.title("🗺️ Ứng Dụng Chuyển Đổi Bản Vẽ Quy Hoạch CAD Sang KMZ")
-st.caption("Hệ thống hỗ trợ đọc file .DXF dung lượng lớn lên đến 30MB và trích xuất Layer thông minh")
+st.caption("Phiên bản sửa lỗi định vị toàn cầu - Tự động hiệu chỉnh thuật toán đảo trục")
 st.markdown("---")
 
 # Khu vực cho người dùng kéo thả hoặc tải file bản vẽ lên
@@ -117,9 +101,26 @@ if uploaded_file:
                                         vn2000_coords = entity.get_points(format='xy')
                                         wgs84_coords = []
                                         
-                                        # Chuyển đổi ma trận đỉnh: Cố định lỗi lệch vị trí bằng cách truyền Y trước, X sau
-                                        for x, y in vn2000_coords:
-                                            lon, lat = transformer.transform(y, x)
+                                        for coord_pair in vn2000_coords:
+                                            val1 = float(coord_pair[0])
+                                            val2 = float(coord_pair[1])
+                                            
+                                            # 🟩 THUẬT TOÁN ĐỊNH VỊ THÔNG MINH:
+                                            # Tọa độ X (Northing) ở Khánh Hòa luôn lớn hơn 1.300.000
+                                            # Tọa độ Y (Easting) ở Khánh Hòa luôn nằm trong khoảng 400.000 đến 600.000
+                                            if val1 > val2:
+                                                x_cad = val1
+                                                y_cad = val2
+                                            else:
+                                                x_cad = val2
+                                                y_cad = val1
+                                                
+                                            # Khử số hiệu múi chiếu đứng đầu nếu có (Ví dụ: 598001.90 -> giữ nguyên)
+                                            if y_cad > 5000000: 
+                                                y_cad = y_cad % 1000000
+                                                
+                                            # Thực hiện phép chiếu chuẩn xác (Truyền Easting_Y trước, Northing_X sau)
+                                            lon, lat = transformer.transform(y_cad, x_cad)
                                             wgs84_coords.append((lon, lat))
                                             
                                         if len(wgs84_coords) >= 2:
@@ -132,7 +133,7 @@ if uploaded_file:
                                                 poly.style.linestyle.color = simplekml.Color.red
                                                 poly.style.linestyle.width = 2
                                                 poly.style.polystyle.color = simplekml.Color.changealphaint(30, simplekml.Color.red)
-                                            # Nếu là đường hở (Tim đường, ranh giới mở) -> Tạo thành LineString
+                                            # Nếu là đường hở -> Tạo thành LineString
                                             else:
                                                 path = kml_folder.newlinestring(name=f"Tuyến_{layer_name}")
                                                 path.coords = wgs84_coords
@@ -152,11 +153,11 @@ if uploaded_file:
                                     except Exception:
                                         continue
                         
-                        # Tiến hành nén nén KML văn bản thành file định dạng .KMZ gọn nhẹ
+                        # Tiến hành nén KML văn bản thành file định dạng .KMZ gọn nhẹ
                         output_kmz = "Ket_Qua_Quy_Hoach_KhanhHoa.kmz"
                         kml.savekmz(output_kmz)
                         
-                        # Hiệu ứng bong bóng chúc mừng và hiển thị nút tải file trực tiếp trên trình duyệt
+                        # Hiệu ứng bong bóng và hiển thị nút tải file trực tiếp trên trình duyệt
                         st.balloons()
                         with open(output_kmz, "rb") as f:
                             st.download_button(
