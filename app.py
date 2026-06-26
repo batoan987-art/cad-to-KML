@@ -3,8 +3,6 @@ import ezdxf
 import pyproj
 import simplekml
 import os
-import re
-import aspose.cad as cad  # Thư viện giải mã file .DWG ngầm
 
 # ==============================================================================
 # 1. CẤU HÌNH HỆ TỌA ĐỘ VN2000 KHÁNH HÒA (Kinh tuyến trục 108°15')
@@ -21,151 +19,156 @@ transformer = pyproj.Transformer.from_crs(VN2000_KH, WGS84_PROJ4, always_xy=True
 # Thiết lập cấu hình trang giao diện Streamlit
 st.set_page_config(page_title="CAD to KMZ Converter - Khánh Hòa", layout="wide")
 
+# 2. THIẾT LẬP CẢNH BÁO BẢN QUYỀN CHUẨN WEB
+# ==============================================================================
+@st.dialog("⚠️")
+def show_copyright_warning():
+    st.warning("**THÔNG BÁO**")
+    st.markdown("""
+    Chương trình này được nghiên cứu và phát triển bởi Bá Toàn chuyên viên Sở Xây dựng tỉnh Khánh Hòa.
+    
+    *Vui lòng góp ý đến: Ba.toan987@gmail.com!*
+    """)
+    if st.button("Tôi Đã Hiểu & Đồng Ý", type="primary"):
+        st.rerun()
+
+if 'warning_shown' not in st.session_state:
+    st.session_state['warning_shown'] = True
+    show_copyright_warning()
 # ==============================================================================
 # 2. GIAO DIỆN CHÍNH CỦA ỨNG DỤNG
 # ==============================================================================
 st.title("🗺️ Ứng Dụng Chuyển Đổi Bản Vẽ Quy Hoạch CAD Sang KMZ")
-st.caption("Hệ thống hỗ trợ đọc trực tiếp file .DWG/.DXF dung lượng lớn lên đến 30MB và trích xuất Layer thông minh")
+st.caption("Hệ thống hỗ trợ đọc file .DXF dung lượng lớn lên đến 30MB và trích xuất Layer thông minh")
 st.markdown("---")
 
 # Khu vực cho người dùng kéo thả hoặc tải file bản vẽ lên
-uploaded_file = st.file_uploader("Tải lên bản vẽ quy hoạch của bạn (Chấp nhận .dwg hoặc .dxf)", type=['dxf', 'dwg'])
+uploaded_file = st.file_uploader("Tải lên bản vẽ quy hoạch của bạn (Định dạng tiêu chuẩn .dxf)", type=['dxf', 'dwg'])
 
 if uploaded_file:
-    # Bước 1: Tạo tên file tạm thời trên máy chủ để xử lý cấu trúc dữ liệu
-    temp_filename = f"temp_{uploaded_file.name}"
-    with open(temp_filename, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-        
-    try:
-        # Bước 2: Tự động nhận diện và xử lý ngầm nếu người dùng nạp file .DWG
-        if uploaded_file.name.lower().endswith('.dwg'):
-            st.info("🔄 Hệ thống đang tự động giải mã cấu trúc dữ liệu file .DWG 2018...")
+    # Bộ kiểm tra định dạng file đầu vào để tránh sập app
+    if uploaded_file.name.lower().endswith('.dwg'):
+        st.error("⚠️ **Thông báo:** Định dạng `.dwg` là mã nguồn đóng và không tương thích với máy chủ Cloud.")
+        st.markdown("""
+        **Cách xử lý rất đơn giản:**
+        1. Bạn mở bản vẽ trên phần mềm **AutoCAD** của bạn.
+        2. Nhấn tổ hợp phím `Ctrl + Shift + S` (hoặc vào menu chọn **Save As**).
+        3. Tại ô **Files of type**, bạn chọn định dạng **AutoCAD R12/LT2000 DXF (*.dxf)** hoặc bất kỳ phiên bản `.dxf` nào.
+        4. Lưu file và tiến hành tải lại file `.dxf` đó lên đây.
+        """)
+    else:
+        # Tạo tên file tạm thời trên máy chủ để xử lý cấu trúc dữ liệu
+        temp_filename = f"temp_{uploaded_file.name}"
+        with open(temp_filename, "wb") as f:
+            f.write(uploaded_file.getbuffer())
             
-            # Nạp dữ liệu nhị phân của file DWG
-            image = cad.Image.load(temp_filename)
-            
-            # Thiết lập tên file DXF trung gian
-            temp_dxf = temp_filename.replace('.dwg', '.dxf')
-            
-            # Xuất ngầm sang định dạng DXF để thư viện hình học có thể bóc tách
-            image.save(temp_dxf)
-            
-            # Đọc cấu trúc bản vẽ sau khi đã chuyển đổi thành công
-            doc = ezdxf.readfile(temp_dxf)
-            
-            # Dọn dẹp file DXF trung gian để tránh nặng máy chủ
-            if os.path.exists(temp_dxf):
-                os.remove(temp_dxf)
-        else:
-            # Nếu người dùng tải lên trực tiếp file .DXF thì hệ thống đọc luôn
+        try:
+            # Đọc cấu trúc bản vẽ DXF
             doc = ezdxf.readfile(temp_filename)
+            msp = doc.modelspace()
             
-        # Truy cập vào không gian mô hình (Model Space) của bản vẽ
-        msp = doc.modelspace()
-        
-        # Quét danh mục và lọc ra toàn bộ các Layer đang chứa đối tượng đồ họa
-        all_layers = sorted(list(set(entity.dxf.layer for entity in msp if entity.dxf.layer)))
-        
-        # Bước 3: Hiển thị bộ lọc tương tác trực quan trên giao diện
-        st.header("⚙️ Bộ Lọc Tương Tác Cấu Hình Dữ Liệu")
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.subheader("1. Chọn Layer muốn xuất sang Google Earth")
-            selected_layers = st.multiselect(
-                "Tích chọn các Layer quy hoạch cần xử lý (Có thể chọn nhiều Layer):",
-                options=all_layers,
-                default=[all_layers[0]] if all_layers else None
-            )
+            # Quét danh mục và lọc ra toàn bộ các Layer đang chứa đối tượng đồ họa
+            all_layers = sorted(list(set(entity.dxf.layer for entity in msp if entity.dxf.layer)))
             
-        with col2:
-            st.subheader("2. Cấu hình phần tử nặng")
-            include_hatch = st.checkbox(
-                "Chuyển đổi cả các vùng tô (Hatch)", 
-                value=False,
-                help="Tắt tính năng này để loại bỏ các mảng màu nặng, giúp file KMZ nhẹ và xử lý nhanh hơn."
-            )
+            # Bước 3: Hiển thị bộ lọc tương tác trực quan trên giao diện
+            st.header("⚙️ Bộ Lọc Tương Tác Cấu Hình Dữ Liệu")
+            col1, col2 = st.columns([2, 1])
             
-            if include_hatch:
-                st.warning("⚠️ Bản vẽ dung lượng lớn chứa nhiều mảng màu Hatch sẽ tốn thời gian tính toán lâu hơn.")
+            with col1:
+                st.subheader("1. Chọn Layer muốn xuất sang Google Earth")
+                selected_layers = st.multiselect(
+                    "Tích chọn các Layer quy hoạch cần xử lý (Có thể chọn nhiều Layer):",
+                    options=all_layers,
+                    default=[all_layers[0]] if all_layers else None
+                )
+                
+            with col2:
+                st.subheader("2. Cấu hình phần tử nặng")
+                include_hatch = st.checkbox(
+                    "Chuyển đổi cả các vùng tô (Hatch)", 
+                    value=False,
+                    help="Tắt tính năng này để loại bỏ các mảng màu nặng, giúp file KMZ nhẹ và xử lý nhanh hơn."
+                )
+                
+                if include_hatch:
+                    st.warning("⚠️ Bản vẽ dung lượng lớn chứa nhiều mảng màu Hatch sẽ tốn thời gian tính toán lâu hơn.")
 
-        st.markdown("---")
-        
-        # Bước 4: Tiến hành xử lý hình học và xuất file khi người dùng bấm nút
-        if st.button("🚀 BẮT ĐẦU CHUYỂN ĐỔI SANG KMZ", type="primary"):
-            if not selected_layers:
-                st.error("🚨 Vui lòng chọn ít nhất 1 Layer để xuất dữ liệu!")
-            else:
-                with st.spinner("Đang tính toán ma trận tọa độ địa chính và đóng gói file KMZ..."):
-                    kml = simplekml.Kml()
-                    
-                    # Duyệt qua từng Layer được chọn để tạo các Thư mục quản lý tương ứng trong KML
-                    for layer_name in selected_layers:
-                        kml_folder = kml.newfolder(name=layer_name)
+            st.markdown("---")
+            
+            # Bước 4: Tiến hành xử lý hình học và xuất file khi người dùng bấm nút
+            if st.button("🚀 BẮT ĐẦU CHUYỂN ĐỔI SANG KMZ", type="primary"):
+                if not selected_layers:
+                    st.error("🚨 Vui lòng chọn ít nhất 1 Layer để xuất dữ liệu!")
+                else:
+                    with st.spinner("Đang tính toán ma trận tọa độ địa chính và đóng gói file KMZ..."):
+                        kml = simplekml.Kml()
                         
-                        # Lọc toàn bộ thực thể thuộc về Layer đang xét
-                        geometries = msp.query(f'*[layer=="{layer_name}"]')
-                        
-                        for entity in geometries:
-                            # XỬ LÝ ĐỐI TƯỢNG ĐƯỜNG NÉT/ĐƯỜNG BAO (Polyline)
-                            if entity.dxftype() in ('LWPOLYLINE', 'POLYLINE'):
-                                try:
-                                    vn2000_coords = entity.get_points(format='xy')
-                                    wgs84_coords = []
-                                    
-                                    # Chuyển đổi ma trận đỉnh: Cố định lỗi lệch vị trí bằng cách truyền Y trước, X sau
-                                    for x, y in vn2000_coords:
-                                        lon, lat = transformer.transform(y, x)
-                                        wgs84_coords.append((lon, lat))
+                        # Duyệt qua từng Layer được chọn để tạo các Thư mục quản lý tương ứng trong KML
+                        for layer_name in selected_layers:
+                            kml_folder = kml.newfolder(name=layer_name)
+                            
+                            # Lọc toàn bộ thực thể thuộc về Layer đang xét
+                            geometries = msp.query(f'*[layer=="{layer_name}"]')
+                            
+                            for entity in geometries:
+                                # XỬ LÝ ĐỐI TƯỢNG ĐƯỜNG NÉT/ĐƯỜNG BAO (Polyline)
+                                if entity.dxftype() in ('LWPOLYLINE', 'POLYLINE'):
+                                    try:
+                                        vn2000_coords = entity.get_points(format='xy')
+                                        wgs84_coords = []
                                         
-                                    if len(wgs84_coords) >= 2:
-                                        # Nếu đường khép kín trong CAD -> Tạo thành Polygon
-                                        if hasattr(entity, 'closed') and entity.closed:
-                                            if wgs84_coords[0] != wgs84_coords[-1]:
-                                                wgs84_coords.append(wgs84_coords[0])
-                                            poly = kml_folder.newpolygon(name=f"Vùng_{layer_name}")
-                                            poly.outerboundaryis = wgs84_coords
-                                            poly.style.linestyle.color = simplekml.Color.red
-                                            poly.style.linestyle.width = 2
-                                            poly.style.polystyle.color = simplekml.Color.changealphaint(30, simplekml.Color.red)
-                                        # Nếu là đường hở (Tim đường, ranh giới mở) -> Tạo thành LineString
-                                        else:
-                                            path = kml_folder.newlinestring(name=f"Tuyến_{layer_name}")
-                                            path.coords = wgs84_coords
-                                            path.style.linestyle.color = simplekml.Color.yellow
-                                            path.style.linestyle.width = 2
-                                except Exception:
-                                    continue
-                                    
-                            # XỬ LÝ ĐỐI TƯỢNG MẢNG MÀU VÙNG TÔ (Hatch) DỰA TRÊN BỘ LỌC TƯƠNG TÁC
-                            elif entity.dxftype() == 'HATCH':
-                                if not include_hatch:
-                                    continue  
-                                    
-                                try:
-                                    for path in entity.paths:
-                                        pass
-                                except Exception:
-                                    continue
-                    
-                    # Tiến hành nén nén KML văn bản thành file định dạng .KMZ gọn nhẹ
-                    output_kmz = "Ket_Qua_Quy_Hoach_KhanhHoa.kmz"
-                    kml.savekmz(output_kmz)
-                    
-                    # Hiệu ứng bong bóng chúc mừng và hiển thị nút tải file trực tiếp trên trình duyệt
-                    st.balloons()
-                    with open(output_kmz, "rb") as f:
-                        st.download_button(
-                            label="💾 TẢI FILE .KMZ TOÀN BỘ BẢN VẼ (MỞ BẰNG GOOGLE EARTH)",
-                            data=f,
-                            file_name=output_kmz,
-                            mime="application/vnd.google-earth.kmz"
-                        )
+                                        # Chuyển đổi ma trận đỉnh: Cố định lỗi lệch vị trí bằng cách truyền Y trước, X sau
+                                        for x, y in vn2000_coords:
+                                            lon, lat = transformer.transform(y, x)
+                                            wgs84_coords.append((lon, lat))
+                                            
+                                        if len(wgs84_coords) >= 2:
+                                            # Nếu đường khép kín trong CAD -> Tạo thành Polygon
+                                            if hasattr(entity, 'closed') and entity.closed:
+                                                if wgs84_coords[0] != wgs84_coords[-1]:
+                                                    wgs84_coords.append(wgs84_coords[0])
+                                                poly = kml_folder.newpolygon(name=f"Vùng_{layer_name}")
+                                                poly.outerboundaryis = wgs84_coords
+                                                poly.style.linestyle.color = simplekml.Color.red
+                                                poly.style.linestyle.width = 2
+                                                poly.style.polystyle.color = simplekml.Color.changealphaint(30, simplekml.Color.red)
+                                            # Nếu là đường hở (Tim đường, ranh giới mở) -> Tạo thành LineString
+                                            else:
+                                                path = kml_folder.newlinestring(name=f"Tuyến_{layer_name}")
+                                                path.coords = wgs84_coords
+                                                path.style.linestyle.color = simplekml.Color.yellow
+                                                path.style.linestyle.width = 2
+                                    except Exception:
+                                        continue
+                                        
+                                # XỬ LÝ ĐỐI TƯỢNG MẢNG MÀU VÙNG TÔ (Hatch) DỰA TRÊN BỘ LỌC TƯƠNG TÁC
+                                elif entity.dxftype() == 'HATCH':
+                                    if not include_hatch:
+                                        continue  
+                                        
+                                    try:
+                                        for path in entity.paths:
+                                            pass
+                                    except Exception:
+                                        continue
                         
-    except Exception as e:
-        st.error(f"🚨 Hệ thống gặp sự cố khi giải mã cấu trúc tệp bản vẽ: {e}")
-    finally:
-        # Xóa file tạm trên máy chủ sau khi xử lý xong để bảo mật dữ liệu
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
+                        # Tiến hành nén nén KML văn bản thành file định dạng .KMZ gọn nhẹ
+                        output_kmz = "Ket_Qua_Quy_Hoach_KhanhHoa.kmz"
+                        kml.savekmz(output_kmz)
+                        
+                        # Hiệu ứng bong bóng chúc mừng và hiển thị nút tải file trực tiếp trên trình duyệt
+                        st.balloons()
+                        with open(output_kmz, "rb") as f:
+                            st.download_button(
+                                label="💾 TẢI FILE .KMZ TOÀN BỘ BẢN VẼ (MỞ BẰNG GOOGLE EARTH)",
+                                data=f,
+                                file_name=output_kmz,
+                                mime="application/vnd.google-earth.kmz"
+                            )
+                            
+        except Exception as e:
+            st.error(f"🚨 Hệ thống gặp sự cố khi giải mã cấu trúc tệp bản vẽ: {e}")
+        finally:
+            # Xóa file tạm trên máy chủ sau khi xử lý xong để bảo mật dữ liệu
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)
