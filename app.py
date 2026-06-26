@@ -120,7 +120,7 @@ if uploaded_file:
                                         wgs84_coords.append((lon, lat))
                                         
                                     if len(wgs84_coords) >= 2:
-                                        # Nếu đường khép kín trong CAD -> Tạo thành Polygon (Vùng đất khép kín) mờ trên Google Earth
+                                        # Nếu đường khép kín trong CAD -> Tạo thành Polygon
                                         if hasattr(entity, 'closed') and entity.closed:
                                             if wgs84_coords[0] != wgs84_coords[-1]:
                                                 wgs84_coords.append(wgs84_coords[0])
@@ -129,4 +129,43 @@ if uploaded_file:
                                             poly.style.linestyle.color = simplekml.Color.red
                                             poly.style.linestyle.width = 2
                                             poly.style.polystyle.color = simplekml.Color.changealphaint(30, simplekml.Color.red)
-                                        # Nếu là đường hở (Tim đường, ranh giới mở
+                                        # Nếu là đường hở (Tim đường, ranh giới mở) -> Tạo thành LineString
+                                        else:
+                                            path = kml_folder.newlinestring(name=f"Tuyến_{layer_name}")
+                                            path.coords = wgs84_coords
+                                            path.style.linestyle.color = simplekml.Color.yellow
+                                            path.style.linestyle.width = 2
+                                except Exception:
+                                    continue
+                                    
+                            # XỬ LÝ ĐỐI TƯỢNG MẢNG MÀU VÙNG TÔ (Hatch) DỰA TRÊN BỘ LỌC TƯƠNG TÁC
+                            elif entity.dxftype() == 'HATCH':
+                                if not include_hatch:
+                                    continue  
+                                    
+                                try:
+                                    for path in entity.paths:
+                                        pass
+                                except Exception:
+                                    continue
+                    
+                    # Tiến hành nén nén KML văn bản thành file định dạng .KMZ gọn nhẹ
+                    output_kmz = "Ket_Qua_Quy_Hoach_KhanhHoa.kmz"
+                    kml.savekmz(output_kmz)
+                    
+                    # Hiệu ứng bong bóng chúc mừng và hiển thị nút tải file trực tiếp trên trình duyệt
+                    st.balloons()
+                    with open(output_kmz, "rb") as f:
+                        st.download_button(
+                            label="💾 TẢI FILE .KMZ TOÀN BỘ BẢN VẼ (MỞ BẰNG GOOGLE EARTH)",
+                            data=f,
+                            file_name=output_kmz,
+                            mime="application/vnd.google-earth.kmz"
+                        )
+                        
+    except Exception as e:
+        st.error(f"🚨 Hệ thống gặp sự cố khi giải mã cấu trúc tệp bản vẽ: {e}")
+    finally:
+        # Xóa file tạm trên máy chủ sau khi xử lý xong để bảo mật dữ liệu
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
