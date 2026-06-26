@@ -2,3 +2,4 @@ streamlit
 ezdxf
 pyproj
 simplekml
+aspose-cad
